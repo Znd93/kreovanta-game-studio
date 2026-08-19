@@ -121,6 +121,16 @@ class JarvisRouterTests(unittest.TestCase):
 
         self.assertEqual(selected.name, "high_allowed_superset")
 
+    def test_no_route_error_exposes_task_context(self):
+        requested = task("market_research", "concept_analysis")
+        error = NoRouteError(requested.id, requested.required_capabilities)
+
+        self.assertTrue(hasattr(error, "task_id"))
+        self.assertTrue(hasattr(error, "required_capabilities"))
+        self.assertEqual(error.task_id, requested.id)
+        self.assertEqual(error.required_capabilities, requested.required_capabilities)
+        self.assertEqual(error.args, (requested.id, requested.required_capabilities))
+
     def test_no_full_match_raises_no_route_error(self):
         registry = AgentRegistry()
         registry.register(registration("artist", frozenset({"visual_art"})))

@@ -6,7 +6,14 @@ from jarvis.registry import AgentRegistry
 
 
 class NoRouteError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        task_id: str,
+        required_capabilities: tuple[str, ...],
+    ) -> None:
+        self.task_id = task_id
+        self.required_capabilities = required_capabilities
+        super().__init__(task_id, required_capabilities)
 
 
 class JarvisRouter:
