@@ -17,9 +17,11 @@ class MessageKind(str, Enum):
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
+    READY = "ready"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    BLOCKED = "blocked"
     WAITING_APPROVAL = "waiting_approval"
     REJECTED = "rejected"
 

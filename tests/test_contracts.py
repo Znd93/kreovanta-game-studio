@@ -98,7 +98,16 @@ class AgentMessageTests(unittest.TestCase):
         )
         self.assertEqual(
             {item.value for item in TaskStatus},
-            {"pending", "running", "completed", "failed", "waiting_approval", "rejected"},
+            {
+                "pending",
+                "ready",
+                "running",
+                "completed",
+                "failed",
+                "blocked",
+                "waiting_approval",
+                "rejected",
+            },
         )
         self.assertEqual(
             {item.value for item in Priority},
