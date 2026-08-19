@@ -1,138 +1,191 @@
 # Kreovanta Game Studio / Jarvis — Project Status
 
-**Status:** Jarvis Core v0.x — Agent Contract v1 verified on GitHub; Orchestrator v1 approved for implementation
-**Updated:** 2026-08-19
+**Status:** Jarvis Orchestrator v1 implemented; active CLI migrated to dynamic orchestration
+**Updated:** 2026-08-20
 **Primary source of truth:** `Znd93/kreovanta-game-studio`
 **Active development branch:** `agent/agent-contract-v1`
 
 ## Current Architecture
 
 ```text
-FOUNDER
-  ↓
+FOUNDER GOAL
+    ↓
 main.py
-  ↓
-run_discovery_workflow()
-  ↓
+    ↓
+JarvisOrchestrator
+    ↓
+JarvisPlanner (local Ollama / qwen3:8b)
+    ↓
+strict JSON parser + plan validation
+    ↓
+ExecutionPlan
+    ↓
+TaskManager
+    ↓
+READY task selection
+    ↓
+ApprovalService (pre-execution gate)
+    ↓
+JarvisRouter ← AgentRegistry
+    ↓
+registered specialist agent
+    ↓
 MessageBus
-  ↓
-ProducerAgent
-  ↓
-MessageBus
-  ↓
-ResearcherAgent
-  ↓
-MessageBus
-  ↓
-GameDirectorAgent
-  ↓
-MessageBus
-  ↓
-FOUNDER APPROVAL
+    ↓
+AgentMessage result
+    ↓
+ApprovalService (post-result gate when required)
+    ↓
+TaskManager
+    ↓
+continue / WAITING_APPROVAL / FAILED / COMPLETED
 ```
 
-`main.py` is now an application entry point rather than the place where agent-to-agent handoffs are hard-coded. The current discovery workflow is still synchronous and sequential, but all current agents communicate through the same message contract.
+The active `main.py` path no longer calls the fixed Producer → Researcher → Game Director workflow. `core/workflow.py` remains available as a legacy/reference path only and is intentionally not deleted in Orchestrator v1.
 
-## Implemented Components
+## Implemented Jarvis Components
 
-### Core
+### `jarvis/models.py`
 
-- `core/contracts.py`
-  - `AgentMessage`
-  - `MessageKind`
-  - `TaskStatus`
-  - `Priority`
-  - `RiskLevel`
-  - fail-fast message validation
-  - UUID message IDs
-  - timezone-aware UTC timestamps
-- `core/message_bus.py`
-  - in-memory FIFO transport
-  - recipient-specific receive
-  - append-only history snapshot
-- `core/workflow.py`
-  - synchronous discovery workflow
-  - structured failure propagation
-- `core/ollama_client.py`
-  - local Ollama transport
-  - model: `qwen3:8b`
+- `JarvisTask`
+- `ExecutionPlan`
+- `AgentRegistration`
+- `OrchestratorState`
+- `ApprovalDecision`
+- `ApprovalDisposition`
+- `ApprovalEvaluation`
+- `PendingApproval`
+- `OrchestratorResult`
 
-### Agents
+### `jarvis/registry.py`
 
-All current agents now inherit `BaseAgent` and use `AgentMessage` for input/output.
+- explicit agent registration
+- duplicate-name rejection
+- capability catalog
+- enabled/disabled filtering
+- allowed-risk filtering
+- deterministic candidate ordering
 
-- `ProducerAgent`
-  - receives Founder request
-  - produces Researcher task
-  - converts malformed local-LLM JSON into a structured FAILED/ERROR message
-- `ResearcherAgent`
-  - receives research task
-  - returns structured research findings to Game Director
-- `GameDirectorAgent`
-  - receives research findings
-  - returns a HIGH-risk `APPROVAL_REQUEST` to Founder
-  - sets `WAITING_APPROVAL`
-  - sets `requires_approval=True`
+### `jarvis/router.py`
 
-### Base Interface
+- deterministic capability routing
+- exact capability match preferred
+- smallest capability superset fallback
+- alphabetical tie-break
+- disabled/risk-disallowed agents excluded
+- fail-closed `NoRouteError`
 
-- `agents/base_agent.py`
-  - validates recipient targeting
-  - enforces `AgentMessage -> AgentMessage`
-  - provides one shared interface for future specialist agents
+### `jarvis/task_manager.py`
 
-### Tests
+- active-plan task state authority
+- `READY`, `BLOCKED`, `RUNNING`, `WAITING_APPROVAL`, terminal states
+- dependency enforcement
+- downstream unlock only after prerequisite completion
+- downstream blocking after failure/rejection
+- pre-execution and post-result approval transitions
+- plan completion/failure calculation
 
-Python standard-library `unittest` suite covers:
+### `jarvis/approvals.py`
 
-- AgentMessage defaults and validation
-- MessageBus FIFO and routing behavior
-- immutable history snapshots
-- BaseAgent recipient validation
-- Producer successful JSON output
-- Producer malformed JSON protection
-- Researcher handoff
-- Game Director Founder Approval request
-- full Producer → Researcher → Game Director workflow
-- workflow failure stop
-- `main.py` import safety
-- terminal Founder Approval behavior
+Risk policy:
 
-**Current verified test count:** 29 tests.
+```text
+LOW      → CONTINUE
+MEDIUM   → CONTINUE_AUDIT
+HIGH     → WAIT → Founder Approval
+CRITICAL → WAIT → Founder Approval → explicit confirmation
+```
 
-## Locked Architecture Decisions
+Protected operation minimums:
 
-1. Jarvis Core v1 uses Python standard library first.
-2. No Pydantic or other mandatory external core dependency yet.
-3. MessageBus v1 is in-memory.
-4. MessageBus interface is designed so persistence can later be replaced by SQLite without changing agent code.
-5. Execution is synchronous first.
-6. Message protocol is designed to remain usable when parallel execution is added later.
-7. Agents are selected by required judgment/skill; deterministic execution belongs in workers/tools.
-8. Jarvis is the orchestrator/team composer, not a fixed sequence of a fixed number of agents.
-9. HIGH/CRITICAL operations remain Founder-controlled.
-10. GitHub remains the intended project source of truth.
+```text
+publish                → HIGH
+delete_important_data  → HIGH
+credentials            → CRITICAL
+security_policy_change → CRITICAL
+locked_core_change     → CRITICAL
+paid_action            → CRITICAL
+```
 
-## Current Limitations
+Planner/agent suggested risk can never lower the policy minimum.
 
-- No dynamic planner/router yet.
-- No automatic team assembly yet.
-- No task graph/dependency scheduler yet.
-- No parallel execution yet.
-- No SQLite persistence yet.
-- MessageBus history is lost when the process exits.
-- No reusable Agent Registry yet.
-- No Developer/Tester/Reviewer bootstrap team yet.
-- No Agent Factory yet.
-- No Roblox Master Template/Game Factory yet.
-- No Rojo automation pipeline yet.
-- No LiveOps/analytics pipeline yet.
-- No asset-library/component-library system yet.
-- No automated Git worker yet.
+### `jarvis/planner.py`
 
-## Founder Approval
+- local Ollama-backed structured planner
+- JSON-only contract
+- enabled capability catalog supplied to Planner
+- malformed JSON rejected
+- non-empty task plan required
+- required task fields validated
+- duplicate task keys rejected
+- unavailable capabilities rejected
+- dependency keys converted to internal task IDs
+- missing/self/circular dependencies rejected
+- priority/risk values validated
+- approval flags validated
+- `PlanValidationError.code == "PLAN_INVALID"`
 
-Current terminal flow still supports:
+### `jarvis/orchestrator.py`
+
+- deterministic synchronous execution loop
+- Planner → TaskManager → Approval → Router → Agent → MessageBus → Result
+- priority-aware READY-task selection
+- generic task delivery with `task_id` and `input_data`
+- agent results collected through MessageBus
+- pre-execution HIGH/CRITICAL gates
+- post-result approval gates
+- CRITICAL explicit confirmation
+- APPROVE resume
+- REJECT fail/block behavior
+- CHANGE context without automatic replanning
+- structured `NO_ROUTE`, agent/protocol, and approval failures
+- disabled or unauthorized agents never execute
+- plan becomes `COMPLETED` only through TaskManager completion
+
+## Active CLI / Startup Registry
+
+`main.py` now constructs:
+
+```text
+MessageBus
+AgentRegistry
+JarvisPlanner
+JarvisRouter
+TaskManager
+ApprovalService
+JarvisOrchestrator
+```
+
+Current explicit startup registrations:
+
+### Producer
+
+```text
+production_planning
+research_coordination
+Risk: LOW / MEDIUM
+```
+
+### Researcher
+
+```text
+market_research
+competitor_analysis
+concept_analysis
+Risk: LOW / MEDIUM
+```
+
+### Game Director
+
+```text
+game_direction
+concept_selection
+Risk: LOW / MEDIUM / HIGH
+```
+
+No directory scanning or implicit registration is used.
+
+Founder decisions are normalized case-insensitively and CHANGE collects a Founder-provided change request:
 
 ```text
 APPROVE
@@ -140,84 +193,123 @@ CHANGE
 REJECT
 ```
 
-Game Director recommendations are represented structurally as:
+CRITICAL approval asks for explicit `CONFIRM` only when the active pending gate requires explicit confirmation.
+
+## Verification State
+
+Task 8 implementation verification:
 
 ```text
-kind: APPROVAL_REQUEST
-status: WAITING_APPROVAL
-risk_level: HIGH
-requires_approval: true
+Task 8 main tests:       8 / 8 PASS
+Task 7 orchestrator:    21 / 21 PASS
+Full regression:       137 / 137 PASS
+compileall:             PASS
+git diff --check:       PASS
 ```
 
-This is the first step toward a reusable approval service.
+The test count is the actual count from the full local verification command, not an estimate.
 
 ## Git / Commit State
 
-### Public GitHub `main`
-
-Latest verified public GitHub commit before this feature work:
-
-`5748d47ae0841af575a8ed6628a6f65afb80e895`
-`Initial Kreovanta Game Studio agent foundation`
-
-### Local feature branch
-
 Feature branch:
 
-`agent/agent-contract-v1`
+```text
+agent/agent-contract-v1
+```
 
-Latest verified code commit before this status update:
+Last verified GitHub canonical commit before Task 7/8:
 
-`cc6afc1`
-`feat: route discovery workflow through message bus`
+```text
+45202f66e02eda112ba250727aa2b7dda49f3c19
+feat: add validated Jarvis execution planner
+```
 
-The feature branch has been pushed to GitHub and the Agent Contract v1 implementation has been verified there. Direct ChatGPT connector writes still return HTTP 403, so repository writes are performed through the local Git checkout and `git push`.
+Task 7 implementation commit:
 
-## Current Task
+```text
+4339a9b2b60379174ec7a10d5b8f16ddb9ff070c
+feat: add Jarvis dynamic orchestration loop
+```
 
-Begin **Jarvis Orchestrator v1** from the approved design and implementation plan, starting with Task 1: shared task/orchestrator models.
+Task 8 implementation commit:
+
+```text
+8ad3a1302dd3d8b6669e06c575a2e9f62c54f96e
+feat: migrate CLI to Jarvis orchestrator
+```
+
+`JARVIS_STATUS.md` is finalized in a separate documentation commit so it can reference the actual Task 7 and Task 8 implementation SHAs without a self-referential commit hash.
+
+## Locked Architecture Decisions
+
+1. Python standard library first for Jarvis Core v1.
+2. Execution is synchronous in v1.
+3. MessageBus remains in-memory in v1.
+4. Planner is advisory; deterministic validation is authoritative.
+5. TaskManager is the only source of truth for task state and plan completion.
+6. Agent Registry is explicit; no module scanning.
+7. Router selects by capability and allowed risk, never by LLM-selected Python class.
+8. Planner/agent risk can never reduce policy minimum risk.
+9. HIGH operations require Founder approval.
+10. CRITICAL operations require Founder approval plus explicit confirmation.
+11. Failures, invalid plans, unavailable routes, and rejected approvals fail closed.
+12. No automatic replanning after CHANGE or failure in v1.
+13. No parallel task execution in v1.
+14. `core/workflow.py` remains as a reversible legacy/reference path during migration cleanup.
+15. GitHub remains the project source of truth.
+
+## Known Limitations / Deferred Work
+
+- no parallel execution
+- no SQLite persistence
+- MessageBus history is process-local
+- no automatic retry/reassignment/replanning
+- no Git Worker yet
+- no Agent Factory yet
+- no Developer/Tester/Reviewer bootstrap team yet
+- no automatic code-writing agents in Orchestrator v1
+- no Roblox publishing or Game Factory pipeline
+- no Rojo automation pipeline
+- no LiveOps/analytics pipeline
+- no asset-library/component-library system
+
+The currently registered Producer, Researcher, and Game Director retain their original Agent Contract v1 domain-specific payload expectations. Orchestrator v1 deliberately does not add hard-coded payload translation or dependency-result transformation for those legacy agent roles. New bootstrap agents should be written natively against the generic Jarvis task contract rather than adding role-specific logic to the Orchestrator.
+
+## Orchestrator v1 Definition of Done
+
+- [x] structured validated Planner
+- [x] explicit Registry
+- [x] deterministic capability Router
+- [x] TaskManager dependency state machine
+- [x] Founder Approval policy service
+- [x] HIGH pre-execution gates
+- [x] CRITICAL explicit confirmation
+- [x] post-result approval gates
+- [x] APPROVE resume
+- [x] REJECT blocks dependent work
+- [x] CHANGE returns context without autonomous replanning
+- [x] dynamic synchronous Orchestrator execution loop
+- [x] active `main.py` migrated away from fixed workflow
+- [x] current agents explicitly registered
+- [x] legacy `core/workflow.py` retained for reversible cleanup
+- [x] full standard-library regression suite green locally
 
 ## Exact Next Engineering Step
 
-After Agent Contract v1 is safely in GitHub, build **Jarvis Orchestration v1**, not another hard-coded agent chain.
-
-The next subsystem should introduce the smallest useful foundation for dynamic team composition:
+Bootstrap the first Jarvis-native engineering team:
 
 ```text
-Agent Registry
+Developer Agent
+Tester Agent
+Reviewer Agent
     ↓
-Role / Capability metadata
+Git Worker
     ↓
-Jarvis Router
+Agent Factory
     ↓
-Select specialist for task
+Dynamic specialist expansion
+    ↓
+Roblox Master Template / Game Factory
 ```
 
-The first goal is not full autonomous team generation. The first goal is to let Jarvis select an existing agent by capability instead of `workflow.py` naming Producer, Researcher, and Game Director directly.
-
-After that:
-
-1. Task/dependency model
-2. Planner
-3. Developer bootstrap agent
-4. Tester bootstrap agent
-5. Reviewer bootstrap agent
-6. Git worker
-7. Agent Factory
-8. dynamic specialist expansion
-9. Roblox Master Template / Game Factory
-
-## Definition of Agent Contract v1 Done
-
-- [x] Shared AgentMessage contract
-- [x] Shared BaseAgent interface
-- [x] In-memory MessageBus
-- [x] Producer refactored
-- [x] Researcher refactored
-- [x] Game Director refactored
-- [x] malformed Producer JSON handled safely
-- [x] Founder Approval represented structurally
-- [x] current discovery flow routed through MessageBus
-- [x] standard-library-only automated test suite
-- [x] status documentation updated
-- [x] feature branch pushed to GitHub
+The next agents should consume the generic Jarvis task contract directly so Jarvis can execute real work without reintroducing fixed role-to-role handoff logic into the core orchestrator.
