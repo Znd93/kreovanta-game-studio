@@ -1,56 +1,66 @@
-from agents.producer import run_producer
-from agents.researcher import run_researcher
-from agents.game_director import run_game_director
+from agents.game_director import GameDirectorAgent
+from agents.producer import ProducerAgent
+from agents.researcher import ResearcherAgent
+from core.message_bus import MessageBus
+from core.workflow import run_discovery_workflow
 
 
-founder_request = "Find a simple Roblox game opportunity."
+FOUNDER_REQUEST = "Find a simple Roblox game opportunity."
 
 
-producer_result = run_producer(founder_request)
-
-print("\n=== PRODUCER ===")
-print(producer_result["producer_message"])
-
-
-research_response = run_researcher(
-    producer_result["research_task"]
-)
-
-print("\n=== RESEARCHER ===")
-print(research_response)
-
-
-director_response = run_game_director(
-    research_response
-)
-
-print("\n=== GAME DIRECTOR ===")
-print(director_response)
+def _print_agent_outputs(bus: MessageBus) -> None:
+    for message in bus.history():
+        if message.sender == "producer":
+            print("\n=== PRODUCER ===")
+            print(message.payload.get("producer_message", message.payload))
+        elif message.sender == "researcher":
+            print("\n=== RESEARCHER ===")
+            print(message.payload.get("research_findings", message.payload))
+        elif message.sender == "game_director":
+            print("\n=== GAME DIRECTOR ===")
+            print(message.payload.get("recommendation", message.payload))
 
 
-print("\n=== STATUS ===")
-print("WAITING FOR FOUNDER APPROVAL")
-
-founder_decision = input(
-    "\nFounder decision [APPROVE / CHANGE / REJECT]: "
-).strip().upper()
-
-if founder_decision == "APPROVE":
+def _handle_founder_decision(founder_decision: str) -> None:
     print("\n=== FOUNDER DECISION ===")
-    print("APPROVED")
-    print("Game plan may continue to the next development stage.")
 
-elif founder_decision == "CHANGE":
-    print("\n=== FOUNDER DECISION ===")
-    print("CHANGES REQUESTED")
-    print("The plan must return to Game Director before development.")
+    if founder_decision == "APPROVE":
+        print("APPROVED")
+        print("Game plan may continue to the next development stage.")
+    elif founder_decision == "CHANGE":
+        print("CHANGES REQUESTED")
+        print("The plan must return to Game Director before development.")
+    elif founder_decision == "REJECT":
+        print("REJECTED")
+        print("Development is blocked.")
+    else:
+        print("INVALID DECISION")
+        print("Development remains blocked.")
 
-elif founder_decision == "REJECT":
-    print("\n=== FOUNDER DECISION ===")
-    print("REJECTED")
-    print("Development is blocked.")
 
-else:
-    print("\n=== FOUNDER DECISION ===")
-    print("INVALID DECISION")
-    print("Development remains blocked.")
+def main() -> None:
+    bus = MessageBus()
+    final_message = run_discovery_workflow(
+        founder_request=FOUNDER_REQUEST,
+        producer=ProducerAgent(),
+        researcher=ResearcherAgent(),
+        game_director=GameDirectorAgent(),
+        bus=bus,
+    )
+
+    _print_agent_outputs(bus)
+
+    print("\n=== STATUS ===")
+    if final_message.requires_approval:
+        print("WAITING FOR FOUNDER APPROVAL")
+    else:
+        print(final_message.status.value.upper())
+
+    founder_decision = input(
+        "\nFounder decision [APPROVE / CHANGE / REJECT]: "
+    ).strip().upper()
+    _handle_founder_decision(founder_decision)
+
+
+if __name__ == "__main__":
+    main()
