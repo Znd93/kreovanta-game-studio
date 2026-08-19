@@ -1,6 +1,6 @@
 # Kreovanta Game Studio / Jarvis — Project Status
 
-**Status:** Jarvis Core v0.x — Agent Contract v1 implemented on feature branch
+**Status:** Jarvis Core v0.x — Agent Contract v1 verified on GitHub; Orchestrator v1 approved for implementation
 **Updated:** 2026-08-19
 **Primary source of truth:** `Znd93/kreovanta-game-studio`
 **Active development branch:** `agent/agent-contract-v1`
@@ -171,11 +171,11 @@ Latest verified code commit before this status update:
 `cc6afc1`
 `feat: route discovery workflow through message bus`
 
-The feature branch has **not yet been pushed to GitHub** because the current ChatGPT GitHub connector can read the public repository but returned HTTP 403 when attempting repository writes.
+The feature branch has been pushed to GitHub and the Agent Contract v1 implementation has been verified there. Direct ChatGPT connector writes still return HTTP 403, so repository writes are performed through the local Git checkout and `git push`.
 
 ## Current Task
 
-Complete Agent Contract v1 as a clean, tested feature branch and move the verified changes into the real GitHub repository.
+Begin **Jarvis Orchestrator v1** from the approved design and implementation plan, starting with Task 1: shared task/orchestrator models.
 
 ## Exact Next Engineering Step
 
@@ -220,4 +220,4 @@ After that:
 - [x] current discovery flow routed through MessageBus
 - [x] standard-library-only automated test suite
 - [x] status documentation updated
-- [ ] feature branch pushed to GitHub
+- [x] feature branch pushed to GitHub
