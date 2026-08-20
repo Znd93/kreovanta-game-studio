@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from core.contracts import Priority, RiskLevel, TaskStatus
+from jarvis.agent_contract import AgentContractVersion
 
 
 def _new_id() -> str:
@@ -166,6 +167,7 @@ class AgentRegistration:
     agent_class: type
     capabilities: frozenset[str]
     allowed_risk_levels: frozenset[RiskLevel]
+    contract_version: AgentContractVersion = AgentContractVersion.LEGACY_V1
     enabled: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -188,6 +190,10 @@ class AgentRegistration:
             for risk_level in self.allowed_risk_levels
         ):
             raise TypeError("allowed_risk_levels must contain RiskLevel values")
+        if not isinstance(self.contract_version, AgentContractVersion):
+            raise TypeError(
+                "contract_version must be an AgentContractVersion"
+            )
         if not isinstance(self.enabled, bool):
             raise TypeError("enabled must be a bool")
         if not isinstance(self.metadata, dict):

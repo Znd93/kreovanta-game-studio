@@ -1,6 +1,7 @@
 import unittest
 
 from core.contracts import Priority, RiskLevel, TaskStatus
+from jarvis.agent_contract import AgentContractVersion
 from jarvis.models import (
     AgentRegistration,
     ApprovalDecision,
@@ -105,6 +106,29 @@ class JarvisModelTests(unittest.TestCase):
         self.assertIn("market_research", registration.capabilities)
         self.assertTrue(registration.enabled)
         self.assertEqual(registration.metadata, {})
+
+    def test_agent_registration_defaults_to_legacy_contract(self):
+        registration = AgentRegistration(
+            name="legacy",
+            agent_class=object,
+            capabilities=frozenset({"cap"}),
+            allowed_risk_levels=frozenset({RiskLevel.LOW}),
+        )
+
+        self.assertEqual(
+            registration.contract_version,
+            AgentContractVersion.LEGACY_V1,
+        )
+
+    def test_agent_registration_rejects_invalid_contract_version(self):
+        with self.assertRaises(TypeError):
+            AgentRegistration(
+                name="invalid",
+                agent_class=object,
+                capabilities=frozenset({"cap"}),
+                allowed_risk_levels=frozenset({RiskLevel.LOW}),
+                contract_version="jarvis_native_v1",
+            )
 
     def test_agent_registration_requires_capabilities_and_risk_levels(self):
         with self.assertRaises(ValueError):

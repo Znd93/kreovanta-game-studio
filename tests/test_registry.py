@@ -2,6 +2,7 @@ import unittest
 
 from agents.base_agent import BaseAgent
 from core.contracts import AgentMessage, RiskLevel
+from jarvis.agent_contract import AgentContractVersion
 from jarvis.models import AgentRegistration
 from jarvis.registry import AgentRegistry
 
@@ -54,6 +55,14 @@ def registration(
 
 
 class AgentRegistryTests(unittest.TestCase):
+    def test_existing_registration_helper_defaults_to_legacy_v1(self):
+        item = registration("researcher")
+
+        self.assertEqual(
+            item.contract_version,
+            AgentContractVersion.LEGACY_V1,
+        )
+
     def test_register_and_get_registration(self):
         registry = AgentRegistry()
         item = registration("researcher")
