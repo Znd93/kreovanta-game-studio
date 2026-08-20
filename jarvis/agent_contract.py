@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from core.contracts import Priority, RiskLevel, TaskStatus
+from core.contracts import AgentMessage, MessageKind, Priority, RiskLevel, TaskStatus
 
 
 _ALLOWED_RESULT_STATES = frozenset(
@@ -134,3 +134,205 @@ class AgentTaskResult:
             raise ValueError(
                 f"{self.status.value} result cannot include an error"
             )
+
+_REQUEST_PAYLOAD_KEYS = frozenset(
+    {
+        "contract_version",
+        "task_id",
+        "goal_id",
+        "title",
+        "required_capabilities",
+        "operation",
+        "input_data",
+        "dependency_results",
+    }
+)
+
+_RESULT_PAYLOAD_KEYS = frozenset(
+    {
+        "contract_version",
+        "task_id",
+        "summary",
+        "output_data",
+        "error",
+    }
+)
+
+_RESULT_KIND_BY_STATUS = {
+    TaskStatus.COMPLETED: MessageKind.RESULT,
+    TaskStatus.FAILED: MessageKind.ERROR,
+    TaskStatus.WAITING_APPROVAL: MessageKind.APPROVAL_REQUEST,
+}
+
+
+def _require_exact_payload_keys(
+    payload: dict[str, Any],
+    expected: frozenset[str],
+    *,
+    label: str,
+) -> None:
+    actual = frozenset(payload)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise AgentContractError(
+            f"{label} payload keys invalid; missing={missing}, extra={extra}"
+        )
+
+
+def request_to_message(
+    request: AgentTaskRequest,
+    *,
+    recipient: str,
+) -> AgentMessage:
+    if not isinstance(request, AgentTaskRequest):
+        raise TypeError("request must be an AgentTaskRequest")
+    _require_non_blank(recipient, "recipient")
+
+    return AgentMessage(
+        sender="jarvis",
+        recipient=recipient,
+        kind=MessageKind.TASK,
+        objective=request.objective,
+        payload={
+            "contract_version": AgentContractVersion.JARVIS_NATIVE_V1.value,
+            "task_id": request.task_id,
+            "goal_id": request.goal_id,
+            "title": request.title,
+            "required_capabilities": list(request.required_capabilities),
+            "operation": request.operation,
+            "input_data": dict(request.input_data),
+            "dependency_results": {
+                task_id: dict(result)
+                for task_id, result in request.dependency_results.items()
+            },
+        },
+        priority=request.priority,
+        risk_level=request.risk_level,
+        requires_approval=request.requires_approval,
+    )
+
+
+def request_from_message(message: AgentMessage) -> AgentTaskRequest:
+    if not isinstance(message, AgentMessage):
+        raise TypeError("message must be an AgentMessage")
+    if message.kind != MessageKind.TASK:
+        raise AgentContractError("native request must use MessageKind.TASK")
+
+    _require_exact_payload_keys(
+        message.payload,
+        _REQUEST_PAYLOAD_KEYS,
+        label="request",
+    )
+    if (
+        message.payload["contract_version"]
+        != AgentContractVersion.JARVIS_NATIVE_V1.value
+    ):
+        raise AgentContractError("wrong native request contract version")
+
+    capabilities = message.payload["required_capabilities"]
+    if not isinstance(capabilities, list):
+        raise AgentContractError("required_capabilities must be a list")
+
+    try:
+        return AgentTaskRequest(
+            task_id=message.payload["task_id"],
+            goal_id=message.payload["goal_id"],
+            title=message.payload["title"],
+            objective=message.objective,
+            required_capabilities=tuple(capabilities),
+            operation=message.payload["operation"],
+            priority=message.priority,
+            risk_level=message.risk_level,
+            requires_approval=message.requires_approval,
+            input_data=dict(message.payload["input_data"]),
+            dependency_results={
+                task_id: dict(result)
+                for task_id, result in message.payload[
+                    "dependency_results"
+                ].items()
+            },
+        )
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise AgentContractError(str(exc)) from exc
+
+
+def result_to_message(
+    result: AgentTaskResult,
+    *,
+    sender: str,
+    parent_id: str,
+) -> AgentMessage:
+    if not isinstance(result, AgentTaskResult):
+        raise TypeError("result must be an AgentTaskResult")
+    _require_non_blank(sender, "sender")
+    _require_non_blank(parent_id, "parent_id")
+
+    return AgentMessage(
+        parent_id=parent_id,
+        sender=sender,
+        recipient="jarvis",
+        kind=_RESULT_KIND_BY_STATUS[result.status],
+        objective=result.summary,
+        payload={
+            "contract_version": AgentContractVersion.JARVIS_NATIVE_V1.value,
+            "task_id": result.task_id,
+            "summary": result.summary,
+            "output_data": dict(result.output_data),
+            "error": result.error,
+        },
+        status=result.status,
+        risk_level=result.risk_level,
+        requires_approval=result.requires_approval,
+    )
+
+
+def result_from_message(
+    message: AgentMessage,
+    *,
+    expected_task_id: str,
+) -> AgentTaskResult:
+    if not isinstance(message, AgentMessage):
+        raise TypeError("message must be an AgentMessage")
+    _require_non_blank(expected_task_id, "expected_task_id")
+    if message.recipient != "jarvis":
+        raise AgentContractError(
+            "native result must be addressed to jarvis"
+        )
+
+    _require_exact_payload_keys(
+        message.payload,
+        _RESULT_PAYLOAD_KEYS,
+        label="result",
+    )
+    if (
+        message.payload["contract_version"]
+        != AgentContractVersion.JARVIS_NATIVE_V1.value
+    ):
+        raise AgentContractError("wrong native result contract version")
+
+    expected_kind = _RESULT_KIND_BY_STATUS.get(message.status)
+    if expected_kind is None or message.kind != expected_kind:
+        raise AgentContractError(
+            "native result message kind/status combination is invalid"
+        )
+
+    task_id = message.payload["task_id"]
+    if task_id != expected_task_id:
+        raise AgentContractError(
+            f"native result task_id mismatch: {task_id!r} != "
+            f"{expected_task_id!r}"
+        )
+
+    try:
+        return AgentTaskResult(
+            task_id=task_id,
+            status=message.status,
+            output_data=dict(message.payload["output_data"]),
+            summary=message.payload["summary"],
+            error=message.payload["error"],
+            risk_level=message.risk_level,
+            requires_approval=message.requires_approval,
+        )
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise AgentContractError(str(exc)) from exc

@@ -1,10 +1,15 @@
 import unittest
 
-from core.contracts import Priority, RiskLevel, TaskStatus
+from core.contracts import AgentMessage, MessageKind, Priority, RiskLevel, TaskStatus
 from jarvis.agent_contract import (
+    AgentContractError,
     AgentContractVersion,
     AgentTaskRequest,
     AgentTaskResult,
+    request_from_message,
+    request_to_message,
+    result_from_message,
+    result_to_message,
 )
 
 
@@ -86,6 +91,138 @@ class AgentContractVersionTests(unittest.TestCase):
             AgentContractVersion.JARVIS_NATIVE_V1.value,
             "jarvis_native_v1",
         )
+
+
+class AgentContractSerializationTests(unittest.TestCase):
+    def make_request(self) -> AgentTaskRequest:
+        return AgentTaskRequest(
+            task_id="task-a",
+            goal_id="goal-1",
+            title="Implement feature",
+            objective="Implement the requested feature",
+            required_capabilities=("code_implementation",),
+            operation="code_change",
+            priority=Priority.HIGH,
+            risk_level=RiskLevel.MEDIUM,
+            requires_approval=False,
+            input_data={"repository": "example/repo"},
+            dependency_results={
+                "task-parent": {
+                    "summary": "Prepared input",
+                    "output_data": {"artifact": "x"},
+                }
+            },
+        )
+
+    def test_request_round_trip_preserves_contract(self):
+        request = self.make_request()
+
+        message = request_to_message(request, recipient="developer")
+        parsed = request_from_message(message)
+
+        self.assertEqual(message.sender, "jarvis")
+        self.assertEqual(message.recipient, "developer")
+        self.assertEqual(message.kind, MessageKind.TASK)
+        self.assertEqual(
+            message.payload["contract_version"],
+            AgentContractVersion.JARVIS_NATIVE_V1.value,
+        )
+        self.assertEqual(parsed, request)
+
+    def test_request_rejects_wrong_contract_version(self):
+        request = self.make_request()
+        message = request_to_message(request, recipient="developer")
+        message.payload["contract_version"] = "legacy_v1"
+
+        with self.assertRaises(AgentContractError):
+            request_from_message(message)
+
+    def test_request_rejects_wrong_message_kind(self):
+        request = self.make_request()
+        message = request_to_message(request, recipient="developer")
+        message.kind = MessageKind.RESULT
+
+        with self.assertRaises(AgentContractError):
+            request_from_message(message)
+
+    def test_completed_result_round_trip_maps_message_kind(self):
+        result = AgentTaskResult(
+            task_id="task-a",
+            status=TaskStatus.COMPLETED,
+            output_data={"files_changed": ["x.py"]},
+            summary="Implemented change",
+            error=None,
+            risk_level=RiskLevel.LOW,
+            requires_approval=False,
+        )
+
+        message = result_to_message(
+            result,
+            sender="developer",
+            parent_id="message-1",
+        )
+        parsed = result_from_message(message, expected_task_id="task-a")
+
+        self.assertEqual(message.kind, MessageKind.RESULT)
+        self.assertEqual(message.recipient, "jarvis")
+        self.assertEqual(parsed, result)
+
+    def test_failed_result_maps_error_kind(self):
+        result = AgentTaskResult(
+            task_id="task-a",
+            status=TaskStatus.FAILED,
+            output_data={},
+            summary="Implementation failed",
+            error="compile error",
+            risk_level=RiskLevel.LOW,
+            requires_approval=False,
+        )
+
+        message = result_to_message(
+            result,
+            sender="developer",
+            parent_id="message-1",
+        )
+
+        self.assertEqual(message.kind, MessageKind.ERROR)
+
+    def test_waiting_result_maps_approval_kind(self):
+        result = AgentTaskResult(
+            task_id="task-a",
+            status=TaskStatus.WAITING_APPROVAL,
+            output_data={"candidate": "x"},
+            summary="Founder review required",
+            error=None,
+            risk_level=RiskLevel.HIGH,
+            requires_approval=True,
+        )
+
+        message = result_to_message(
+            result,
+            sender="reviewer",
+            parent_id="message-1",
+        )
+
+        self.assertEqual(message.kind, MessageKind.APPROVAL_REQUEST)
+
+    def test_result_rejects_task_id_mismatch(self):
+        result = AgentTaskResult(
+            task_id="task-a",
+            status=TaskStatus.COMPLETED,
+            output_data={},
+            summary="Done",
+            error=None,
+            risk_level=RiskLevel.LOW,
+            requires_approval=False,
+        )
+        message = result_to_message(
+            result,
+            sender="developer",
+            parent_id="message-1",
+        )
+
+        with self.assertRaises(AgentContractError):
+            result_from_message(message, expected_task_id="task-b")
 
 
 if __name__ == "__main__":
