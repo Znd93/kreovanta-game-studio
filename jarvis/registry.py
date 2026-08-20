@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from agents.base_agent import BaseAgent
+from agents.jarvis_native import JarvisNativeAgent
 from core.contracts import RiskLevel
+from jarvis.agent_contract import AgentContractVersion
 from jarvis.models import AgentRegistration
 
 
@@ -14,6 +16,18 @@ class AgentRegistry:
             raise TypeError("registration must be an AgentRegistration")
         if not issubclass(registration.agent_class, BaseAgent):
             raise TypeError("agent_class must be a BaseAgent subclass")
+        if (
+            registration.contract_version
+            == AgentContractVersion.JARVIS_NATIVE_V1
+            and not issubclass(
+                registration.agent_class,
+                JarvisNativeAgent,
+            )
+        ):
+            raise TypeError(
+                "JARVIS_NATIVE_V1 agent_class must be a "
+                "JarvisNativeAgent subclass"
+            )
         if registration.name in self._registrations:
             raise ValueError(f"agent already registered: {registration.name}")
         self._registrations[registration.name] = registration

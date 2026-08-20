@@ -1,8 +1,13 @@
 import unittest
 
 from agents.base_agent import BaseAgent
-from core.contracts import AgentMessage, RiskLevel
-from jarvis.agent_contract import AgentContractVersion
+from agents.jarvis_native import JarvisNativeAgent
+from core.contracts import AgentMessage, RiskLevel, TaskStatus
+from jarvis.agent_contract import (
+    AgentContractVersion,
+    AgentTaskRequest,
+    AgentTaskResult,
+)
 from jarvis.models import AgentRegistration
 from jarvis.registry import AgentRegistry
 
@@ -33,6 +38,24 @@ class MismatchedAgent(BaseAgent):
 
     def _handle(self, message: AgentMessage) -> AgentMessage:
         return message
+
+
+class NativeAgent(JarvisNativeAgent):
+    name = "native"
+
+    def _execute(
+        self,
+        request: AgentTaskRequest,
+    ) -> AgentTaskResult:
+        return AgentTaskResult(
+            task_id=request.task_id,
+            status=TaskStatus.COMPLETED,
+            output_data={},
+            summary="Done",
+            error=None,
+            risk_level=request.risk_level,
+            requires_approval=False,
+        )
 
 
 def registration(
@@ -98,6 +121,33 @@ class AgentRegistryTests(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             registry.register(item)
+
+    def test_native_registration_requires_native_agent_subclass(self):
+        registry = AgentRegistry()
+        item = AgentRegistration(
+            name="researcher",
+            agent_class=ResearcherAgent,
+            capabilities=frozenset({"market_research"}),
+            allowed_risk_levels=frozenset({RiskLevel.LOW}),
+            contract_version=AgentContractVersion.JARVIS_NATIVE_V1,
+        )
+
+        with self.assertRaises(TypeError):
+            registry.register(item)
+
+    def test_native_registration_accepts_native_agent_subclass(self):
+        registry = AgentRegistry()
+        item = AgentRegistration(
+            name="native",
+            agent_class=NativeAgent,
+            capabilities=frozenset({"native_cap"}),
+            allowed_risk_levels=frozenset({RiskLevel.LOW}),
+            contract_version=AgentContractVersion.JARVIS_NATIVE_V1,
+        )
+
+        registry.register(item)
+
+        self.assertIs(registry.get("native"), item)
 
     def test_disabled_registration_is_excluded_from_candidates_and_capabilities(self):
         registry = AgentRegistry()
